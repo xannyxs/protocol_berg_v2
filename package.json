@@ -10,6 +10,8 @@
     "@remotion/fonts": "4.0.302",
     "@remotion/tailwind-v4": "4.0.302",
     "@remotion/zod-types": "4.0.302",
+    "dayjs": "^1.11.13",
+    "ethereum-blockies-base64": "^1.0.2",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "remotion": "4.0.302",
