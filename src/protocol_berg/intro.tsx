@@ -71,11 +71,9 @@ export const Intro: React.FC<z.infer<typeof compositionSchema>> = (props) => {
 	const titleClassName = () => {
 		console.log("title length #", props.name);
 		let className = "w-full font-bold text-center";
-		if (props.name.length >= 140) className += " text-8xl leading-none";
-		if (props.name.length > 60 && props.name.length < 140)
-			className += " text-8xl leading-tight";
-		if (props.name.length > 40 && props.name.length < 60)
-			className += " text-9xl leading-tight";
+		if (props.name.length >= 140) className += " text-6xl leading-none";
+		if (props.name.length > 40 && props.name.length < 140)
+			className += " text-7xl leading-tight";
 		if (props.name.length < 40) className += " text-[9rem]";
 
 		return className;
@@ -100,24 +98,35 @@ export const Intro: React.FC<z.infer<typeof compositionSchema>> = (props) => {
 				</Sequence>
 			</AbsoluteFill>
 
-			<div className="flex relative mt-28" style={{ opacity: delayedOpacity }}>
-				<Sequence name="Title" layout="none">
-					<span style={{ fontFamily: fontFamily }}>{props.name}</span>
+			<AbsoluteFill
+				className="flex relative flex-col justify-end pb-12"
+				style={{ opacity: delayedOpacity }}
+			>
+				<Sequence
+					name="Title"
+					from={introTime + 10}
+					durationInFrames={sessionTime}
+					layout="none"
+				>
+					<h1 className={titleClassName()} style={{ fontFamily }}>
+						{props.name}
+					</h1>
 				</Sequence>
-			</div>
 
-			<div className="flex relative mt-28" style={{ opacity: delayedOpacity }}>
 				<Sequence name="Speakers" layout="none">
-					<div className="flex justify-center items-center w-full">
+					<div className="flex justify-center items-center mt-10 w-full">
 						<div className={speakersClassName()}>
 							{props.speakers.map((i) => {
 								return (
 									<div key={i.id} className="flex flex-col gap-4 items-center">
 										<Img
-											className="object-cover w-48 h-48 rounded-full"
+											className="object-cover w-32 h-32 rounded-full"
 											src={CreateAvatar(i.name)}
 										/>
-										<span className="w-48 text-3xl font-medium leading-normal text-center">
+										<span
+											style={{ fontFamily }}
+											className="w-48 text-3xl font-medium leading-normal text-center"
+										>
 											{i.name}
 										</span>
 									</div>
@@ -126,11 +135,11 @@ export const Intro: React.FC<z.infer<typeof compositionSchema>> = (props) => {
 						</div>
 					</div>
 				</Sequence>
-			</div>
+			</AbsoluteFill>
 
 			<div
 				style={{ opacity: delayedOpacity }}
-				className="flex absolute bottom-5 left-5 flex-col gap-4 text-4xl text-right"
+				className="flex absolute top-5 right-5 flex-col gap-4 text-4xl text-right"
 			>
 				<Sequence name="Datetime" layout="none">
 					<span style={{ fontFamily: fontFamily }}>

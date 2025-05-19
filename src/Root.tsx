@@ -13,7 +13,7 @@ export const RemotionRoot: React.FC = () => {
 				fps={25}
 				width={1920}
 				height={1080}
-				defaultProps={MOCK_SESSION[0]}
+				defaultProps={MOCK_SESSION[3]}
 			/>
 		</>
 	);
