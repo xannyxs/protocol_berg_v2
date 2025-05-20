@@ -10,6 +10,17 @@ import {
 } from "remotion";
 import { z } from "zod";
 import { CreateAvatar } from "../utils/createAvatar";
+import { loadFont } from "@remotion/fonts";
+
+const fontFamily = "LM";
+
+loadFont({
+	family: fontFamily,
+	url: staticFile("LM-regular.ttf"),
+	weight: "500",
+}).then(() => {
+	console.log("Font loaded!");
+});
 
 export interface SpeakerProps {
 	id: string;
