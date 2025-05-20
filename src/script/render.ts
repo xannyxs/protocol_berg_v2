@@ -4,7 +4,6 @@ import { Readable } from "stream";
 import { bundle } from "@remotion/bundler";
 import { getCompositions, renderMedia, renderStill } from "@remotion/renderer";
 import { google } from "googleapis";
-import { exit } from "process";
 
 const CREDENTIALS_PATH = join(process.cwd(), "credentials.json");
 const SPREADSHEET_ID = "1G6mHLw9Y8h8pN4g-b0VNm1djx7eJLcMpXZtZB4JSm9E";
@@ -115,11 +114,8 @@ async function processSessions() {
 	try {
 		auth = await getGoogleAuth();
 	} catch (e) {
-		console.error("Google Authentication failed:", e.message);
-		console.error(
-			"Ensure 'credentials.json' is valid and has correct permissions for Sheets and Drive.",
-		);
-		exit(1);
+		console.error("Google Authentication failed:", e);
+		process.exit(1);
 	}
 
 	const sessions = await getSheetData(auth);
@@ -280,30 +276,16 @@ async function processSessions() {
 			}
 			console.log(`Successfully rendered: ${outputFilePath}`);
 
-			const targetFolderId =
-				STAGE_TO_FOLDER_ID_MAP[stage] || DEFAULT_DRIVE_FOLDER_ID;
-			if (!STAGE_TO_FOLDER_ID_MAP[stage]) {
-				console.warn(
-					`Warning: Stage "${stage}" not found in mapping. Uploading to default folder: ${DEFAULT_DRIVE_FOLDER_ID}`,
-				);
-			}
+			const targetFolderId = DEFAULT_DRIVE_FOLDER_ID;
 
 			await uploadToDrive(auth, outputFilePath, outputFileName, targetFolderId);
-			// Optionally, delete local file
-			// await fs.unlink(outputFilePath);
-			// console.log(`Deleted local file: ${outputFilePath}`);
 		} catch (error) {
-			console.error(
-				`Failed to process session "${sessionTitle}":`,
-				error.message,
-			);
-			// Continue with the next session
+			console.error(`Failed to process session "${sessionTitle}":`, error);
 		}
 	}
 	console.log("\nAll sessions processed.");
 }
 
-// --- Run the script ---
 processSessions()
 	.then(() => {
 		console.log("Script finished successfully.");
