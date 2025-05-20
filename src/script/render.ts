@@ -138,8 +138,7 @@ async function processSessions() {
 		return;
 	}
 
-	console.log(remotionComps);
-	const targetRemotionCompId = "MainComposition"; // <--- !!! CHANGE THIS to your actual Remotion comp ID !!!
+	const targetRemotionCompId = "Protocol-Berg";
 	const targetRemotionComp = remotionComps.find(
 		(c) => c.id === targetRemotionCompId,
 	);
