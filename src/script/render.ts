@@ -68,8 +68,12 @@ const getSheetData = async (auth: any) => {
 	}
 };
 
-// --- Google Drive Helper ---
-async function uploadToDrive(auth, filePath, fileName, folderId) {
+const uploadToDrive = async (
+	auth: any,
+	filePath: string,
+	fileName: string,
+	folderId: string,
+) => {
 	const drive = google.drive({ version: "v3", auth });
 	const fileMetadata = {
 		name: fileName,
@@ -92,13 +96,10 @@ async function uploadToDrive(auth, filePath, fileName, folderId) {
 		console.log(`View link: ${file.data.webViewLink}`);
 		return file.data;
 	} catch (err) {
-		console.error(`Error uploading "${fileName}" to Drive:`, err.message);
-		if (err.response?.data?.error) {
-			console.error("Google API Error:", err.response.data.error);
-		}
-		throw new Error(`Drive upload failed: ${err.message}`);
+		console.error(`Error uploading "${fileName}" to Drive:`, err);
+		exit(1);
 	}
-}
+};
 
 // --- Main Render and Upload Logic ---
 async function processSessions() {
@@ -176,9 +177,9 @@ async function processSessions() {
 				: Date.now(), // Append Z if UTC, parse carefully
 			speakers: speakersStr
 				.split(",")
-				.map((name) => name.trim())
+				.map((name: any) => name.trim())
 				.filter(Boolean) // Remove empty names
-				.map((name) => ({
+				.map((name: any) => ({
 					id: name
 						.toLowerCase()
 						.replace(/\s+/g, "-")
@@ -239,13 +240,7 @@ async function processSessions() {
 		console.log(`Successfully rendered: ${outputFilePath}`);
 
 		// --- Upload to Google Drive ---
-		const targetFolderId =
-			STAGE_TO_FOLDER_ID_MAP[stage] || DEFAULT_DRIVE_FOLDER_ID;
-		if (!STAGE_TO_FOLDER_ID_MAP[stage]) {
-			console.warn(
-				`Warning: Stage "${stage}" not found in mapping. Uploading to default folder: ${DEFAULT_DRIVE_FOLDER_ID}`,
-			);
-		}
+		const targetFolderId = DEFAULT_DRIVE_FOLDER_ID;
 
 		try {
 			await uploadToDrive(auth, outputFilePath, outputFileName, targetFolderId);
