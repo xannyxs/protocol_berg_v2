@@ -31,51 +31,61 @@ const getGoogleAuth = async () => {
 	return auth.getClient();
 };
 
-const getSheetData = async (auth: any) => {
-	const sheets = google.sheets({ version: "v4", auth });
+const getSheetData = async (authClient: any) => {
+	const sheets = google.sheets({ version: "v4", auth: authClient });
 	try {
 		console.log(`Workspaceing data from sheet: ${SHEET_NAME}`);
 		const response = await sheets.spreadsheets.values.get({
 			spreadsheetId: SPREADSHEET_ID,
-			range: `${SHEET_NAME}!A:Z`, // Read all columns up to Z, adjust if wider
+			range: `${SHEET_NAME}!A:P`,
 		});
-		const rows = response.data.values;
-		if (!rows || rows.length === 0) {
-			console.log("No data found in the sheet.");
-			return [];
+
+		const allRows = response.data.values;
+		if (!allRows || allRows.length < 3) {
+			console.log(
+				"No sufficient data found in the sheet (expected data from row 3).",
+			);
+			process.exit(1);
 		}
 
-		const headers = rows[0].map((header) => header.trim());
-		const data = rows.slice(1).map((row) => {
-			const rowData: any = {};
+		const headers = allRows[1].map((header) => String(header || "").trim());
+		const dataRows = allRows.slice(2);
 
-			headers.forEach((header, index) => {
-				rowData[header] = row[index] !== undefined ? row[index] : ""; // Handle empty cells
-			});
-			return rowData;
-		});
+		const data = dataRows
+			.map((row) => {
+				const rowData: any = {};
+				if (row[0] === undefined || String(row[0]).trim() === "") {
+					return null;
+				}
+				headers.forEach((header, index) => {
+					rowData[header] =
+						row[index] !== undefined ? String(row[index]).trim() : "";
+				});
+				return rowData;
+			})
+			.filter(Boolean);
 
-		console.log(`Successfully fetched ${data.length} sessions.`);
+		console.log(`Successfully fetched and processed ${data.length} sessions.`);
 		return data;
 	} catch (err) {
-		console.error("Error fetching sheet data:", err);
-		exit(1);
+		console.error("Error fetching or parsing sheet data:", err);
+		process.exit(1);
 	}
 };
 
 const uploadToDrive = async (
-	auth: any,
-	filePath: string,
-	fileName: string,
-	folderId: string,
+	authClient: any,
+	filePath: any,
+	fileName: any,
+	folderId: any,
 ) => {
-	const drive = google.drive({ version: "v3", auth });
+	const drive = google.drive({ version: "v3", auth: authClient });
 	const fileMetadata = {
 		name: fileName,
 		parents: [folderId],
 	};
 	const media = {
-		body: Readable.from(await fs.readFile(filePath)), // Use stream for large files
+		body: Readable.from(await fs.readFile(filePath)),
 	};
 
 	try {
@@ -92,25 +102,31 @@ const uploadToDrive = async (
 		return file.data;
 	} catch (err) {
 		console.error(`Error uploading "${fileName}" to Drive:`, err);
-		exit(1);
+
+		process.exit(1);
 	}
 };
 
-// --- Main Render and Upload Logic ---
 async function processSessions() {
 	console.log("Starting Remotion render and upload process...");
 	await fs.mkdir(ASSET_FOLDER, { recursive: true });
 
-	let auth = await getGoogleAuth().catch((e) => {
-		console.error("Google Authentication failed:", e);
+	let auth;
+	try {
+		auth = await getGoogleAuth();
+	} catch (e) {
+		console.error("Google Authentication failed:", e.message);
 		console.error(
 			"Ensure 'credentials.json' is valid and has correct permissions for Sheets and Drive.",
 		);
 		exit(1);
-	});
+	}
 
 	const sessions = await getSheetData(auth);
-	if (sessions.length === 0) return;
+	if (!sessions || sessions.length === 0) {
+		console.log("No sessions to process.");
+		return;
+	}
 
 	console.log("Bundling Remotion project...");
 	const bundled = await bundle({
@@ -119,17 +135,18 @@ async function processSessions() {
 	console.log("Remotion project bundled.");
 
 	const remotionComps = await getCompositions(bundled);
-	if (remotionComps.length === 0) {
+	if (!remotionComps || remotionComps.length === 0) {
 		console.error(
 			"No Remotion compositions found. Check your Remotion project.",
 		);
 		return;
 	}
-	// --- IMPORTANT: Select your Remotion Composition ---
-	// Option 1: Use the first composition found
+
+	// --- IMPORTANT: Select your Target Remotion Composition ---
+	// Option 1: Use the first composition found (if you only have one relevant one)
 	// const targetRemotionComp = remotionComps[0];
-	// Option 2: Specify by ID (Recommended if you have multiple)
-	const targetRemotionCompId = "MainComposition"; // <--- CHANGE THIS to your actual Remotion comp ID
+	// Option 2: Specify by ID (Recommended)
+	const targetRemotionCompId = "MainComposition"; // <--- !!! CHANGE THIS to your actual Remotion comp ID !!!
 	const targetRemotionComp = remotionComps.find(
 		(c) => c.id === targetRemotionCompId,
 	);
@@ -144,108 +161,143 @@ async function processSessions() {
 		);
 		return;
 	}
-	console.log(`Using Remotion composition: "${targetRemotionComp.id}"`);
+	console.log(
+		`Using Remotion composition: "${targetRemotionComp.id}" (Duration: ${targetRemotionComp.durationInFrames} frames)`,
+	);
 
 	for (const session of sessions) {
-		// --- Construct inputProps from session data ---
-		// This needs to match your Remotion component's expected props
-		// And the column names in your Google Sheet
-		const sessionName = session["Session Title"] || "Untitled Session"; // Example column name
+		const sessionTitle = session["Title of the session"];
+		if (!sessionTitle) {
+			// Basic check to skip rows that might be completely empty but not filtered out
+			console.warn("Skipping session due to missing title.");
+			continue;
+		}
+
 		const sessionId =
-			session["Session ID"] ||
-			sessionName.toLowerCase().replace(/\s+/g, "-") ||
-			`session-${Date.now()}`;
-		const sessionStartStr = session["Start Date & Time (UTC)"]; // Example: "2024-07-28 14:00"
-		const speakersStr = session["Speakers"] || ""; // Example: "Ada Lovelace, Charles Babbage"
-		const renderType =
-			session["Render Type"] ||
-			(targetRemotionComp.durationInFrames === 1 ? "Still" : "Animation"); // "Still" or "Animation"
-		// const stage = session["Stage"] || "";
+			sessionTitle
+				.toLowerCase()
+				.replace(/\s+/g, "-")
+				.replace(/[^a-z0-9-]/g, "") || `session-${Date.now()}`;
+		const description = session["Description"] || "";
+		const stage = session["Stage"] || "";
+		const day = session["Day"] || ""; // e.g., "2024-07-20"
+		const startTime = session["Start"] || ""; // e.g., "10:00"
+		// const endTime = session["End"] || ""; // Available if needed
+		const sessionType = session["Session Type"] || ""; // E.g. "Still", "Animation", "Talk", "Workshop"
 
-		console.log(`\nProcessing session: "${sessionName}" (ID: ${sessionId})`);
-
-		const inputProps = {
-			id: sessionId,
-			name: sessionName,
-			start: sessionStartStr
-				? new Date(sessionStartStr + "Z").getTime()
-				: Date.now(), // Append Z if UTC, parse carefully
-			speakers: speakersStr
-				.split(",")
-				.map((name: any) => name.trim())
-				.filter(Boolean) // Remove empty names
-				.map((name: any) => ({
-					id: name
+		const speakers = [];
+		for (let i = 1; i <= 6; i++) {
+			const speakerName = session[`Speaker ${i}`];
+			if (speakerName && String(speakerName).trim() !== "") {
+				speakers.push({
+					id: String(speakerName)
+						.trim()
 						.toLowerCase()
 						.replace(/\s+/g, "-")
 						.replace(/[^a-z0-9-]/g, ""),
-					name: name,
-				})),
-			// Add any other props your Remotion component needs based on sheet columns
-			// e.g., track: session["Track"], description: session["Description"]
+					name: String(speakerName).trim(),
+				});
+			}
+		}
+
+		console.log(`\nProcessing session: "${sessionTitle}" (ID: ${sessionId})`);
+
+		let startTimestamp = Date.now(); // Default to now if parsing fails
+		if (day && startTime) {
+			// Assuming 'day' is YYYY-MM-DD and 'startTime' is HH:MM
+			// Be careful with timezones. This creates a date object based on system's local timezone.
+			// If sheet times are UTC, ensure they are marked or parsed as such.
+			// For UTC, you might construct as: `${day}T${startTime}:00Z`
+			const dateTimeString = `${day} ${startTime}`; // e.g., "2024-07-20 10:00"
+			const parsedDate = new Date(dateTimeString);
+			if (!isNaN(parsedDate.getTime())) {
+				startTimestamp = parsedDate.getTime();
+			} else {
+				console.warn(
+					`Could not parse date/time for session "${sessionTitle}": ${dateTimeString}. Using current time as fallback.`,
+				);
+			}
+		} else {
+			console.warn(
+				`Missing Day or Start time for session "${sessionTitle}". Using current time as fallback.`,
+			);
+		}
+
+		const inputProps = {
+			id: sessionId,
+			name: sessionTitle,
+			description: description,
+			stage: stage,
+			start: startTimestamp,
+			speakers: speakers,
+			placeholderUrl: session["Placeholder Url"] || "",
+			meerkatQrUrl: session["Meerkat QR Url"] || "",
+			animationUrl: session["Animation Url"] || "",
+			// Add any other props your Remotion component expects
 		};
 
 		console.log("Render Input Props:", JSON.stringify(inputProps, null, 2));
 
+		// Determine render type: Use "Session Type" column if it's 'Still' or 'Animation', else fallback
+		let renderTypeDecision = "animation"; // Default
+		if (sessionType.toLowerCase() === "still") {
+			renderTypeDecision = "still";
+		} else if (sessionType.toLowerCase() === "animation") {
+			renderTypeDecision = "animation";
+		} else {
+			// Fallback if "Session Type" is not explicitly 'Still' or 'Animation'
+			renderTypeDecision =
+				targetRemotionComp.durationInFrames === 1 ? "still" : "animation";
+		}
+		console.log(`Determined render type: ${renderTypeDecision}`);
+
 		let outputFilePath;
 		let outputFileName;
 
-		if (renderType.toLowerCase() === "still") {
-			outputFileName = `${sessionId}.png`;
-			outputFilePath = join(ASSET_FOLDER, outputFileName);
-			console.log(`Rendering Still: ${outputFileName}`);
-			try {
+		try {
+			if (renderTypeDecision === "still") {
+				outputFileName = `${sessionId}.png`;
+				outputFilePath = join(ASSET_FOLDER, outputFileName);
+				console.log(`Rendering Still: ${outputFileName}`);
 				await renderStill({
 					composition: targetRemotionComp,
 					serveUrl: bundled,
 					output: outputFilePath,
 					inputProps: inputProps,
-					// imageFormat: 'jpeg', // if you prefer jpeg
 				});
-			} catch (renderError) {
-				console.error(
-					`Error rendering Still for "${sessionName}":`,
-					renderError,
-				);
-				continue; // Skip to next session
-			}
-		} else {
-			// Default to animation
-			outputFileName = `${sessionId}.mp4`;
-			outputFilePath = join(ASSET_FOLDER, outputFileName);
-			console.log(`Rendering Animation: ${outputFileName}`);
-			try {
+			} else {
+				// Animation
+				outputFileName = `${sessionId}.mp4`;
+				outputFilePath = join(ASSET_FOLDER, outputFileName);
+				console.log(`Rendering Animation: ${outputFileName}`);
 				await renderMedia({
 					codec: "h264",
 					composition: targetRemotionComp,
 					serveUrl: bundled,
 					outputLocation: outputFilePath,
 					inputProps: inputProps,
-					// quality: 'high', // Optional
-					// concurrency: null, // Uses all available cores
 				});
-			} catch (renderError) {
-				console.error(
-					`Error rendering Animation for "${sessionName}":`,
-					renderError,
-				);
-				continue; // Skip to next session
 			}
-		}
-		console.log(`Successfully rendered: ${outputFilePath}`);
+			console.log(`Successfully rendered: ${outputFilePath}`);
 
-		const targetFolderId = DEFAULT_DRIVE_FOLDER_ID;
+			const targetFolderId =
+				STAGE_TO_FOLDER_ID_MAP[stage] || DEFAULT_DRIVE_FOLDER_ID;
+			if (!STAGE_TO_FOLDER_ID_MAP[stage]) {
+				console.warn(
+					`Warning: Stage "${stage}" not found in mapping. Uploading to default folder: ${DEFAULT_DRIVE_FOLDER_ID}`,
+				);
+			}
 
-		try {
 			await uploadToDrive(auth, outputFilePath, outputFileName, targetFolderId);
-			// Optionally, delete the local file after successful upload
+			// Optionally, delete local file
 			// await fs.unlink(outputFilePath);
 			// console.log(`Deleted local file: ${outputFilePath}`);
-		} catch (uploadError) {
+		} catch (error) {
 			console.error(
-				`Failed to upload "${outputFileName}" for session "${sessionName}".`,
+				`Failed to process session "${sessionTitle}":`,
+				error.message,
 			);
-			// Decide if you want to stop or continue
+			// Continue with the next session
 		}
 	}
 	console.log("\nAll sessions processed.");
