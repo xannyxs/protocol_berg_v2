@@ -1,12 +1,10 @@
-import { join, extname } from "path";
+import { join } from "path";
 import fs from "fs/promises";
 import { Readable } from "stream";
 import { bundle } from "@remotion/bundler";
 import { getCompositions, renderMedia, renderStill } from "@remotion/renderer";
 import { google } from "googleapis";
-
-const ssh =
-	"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCyIJTCkBqf0OfZ+IDt8sy6isiG9rp199BXDPy6Ql1Mvy9X3H1BGq1f3hAe0m/RxDwieNhoE2pKRCd9j/gwcr0alyiEwIWIl+yCTwS9tpsMQjnruu706OsAczJ4kPDH2YgNq4q1gBM4tHqMCcVmHdTRpgPnyDUVfYR8l7vW8lUWWKVl/UIcizo9JouWu+b0i8bsVvXOcqio/hdHxcewedHDMSBFVVVOm7gmNRiZLWK0ANmT6ZCK/MQ3PCq+1JZKpTOdUFmAPFK3fKkqCeuA/6lH/6YDNNQJWs67HPGaZKXO8DYhdLRqxkN4tMwHQM/MX1m+rUDAypZWFowKObNdMl8U8Ol9b1QjsM89Kw9QA1l9Sdyrs5appGQOOZLY8tElYbot+IwxYg0UkiUB4cwrF0V3PBHgzhBoiYj8c6cmfwhSBAm41K9mmUn9ykKTUmBFlxhRxXca1GIZagRSkRhmDHmAGAeeIlZmlX0TwtIO1S6kKrpsqVG0tMevBzBQfIFpt/k= xannyx@saturn";
+import { exit } from "process";
 
 const CREDENTIALS_PATH = join(process.cwd(), "credentials.json");
 const SPREADSHEET_ID = "1G6mHLw9Y8h8pN4g-b0VNm1djx7eJLcMpXZtZB4JSm9E";
@@ -27,20 +25,18 @@ const STAGE_TO_FOLDER_ID_MAP = {
 };
 const DEFAULT_DRIVE_FOLDER_ID = "1vMdKFqW--3_Y6imkjwex_DsI2P9os7Sb"; // Fallback (parent folder)
 
-// --- Google API Authentication ---
-async function getGoogleAuth() {
+const getGoogleAuth = async () => {
 	const auth = new google.auth.GoogleAuth({
 		keyFile: CREDENTIALS_PATH,
 		scopes: [
 			"https://www.googleapis.com/auth/spreadsheets.readonly",
-			"https://www.googleapis.com/auth/drive.file", // Allows creating/uploading files
+			"https://www.googleapis.com/auth/drive.file",
 		],
 	});
 	return auth.getClient();
-}
+};
 
-// --- Google Sheets Helper ---
-async function getSheetData(auth) {
+const getSheetData = async (auth: any) => {
 	const sheets = google.sheets({ version: "v4", auth });
 	try {
 		console.log(`Workspaceing data from sheet: ${SHEET_NAME}`);
@@ -56,22 +52,21 @@ async function getSheetData(auth) {
 
 		const headers = rows[0].map((header) => header.trim());
 		const data = rows.slice(1).map((row) => {
-			const rowData = {};
+			const rowData: any = {};
+
 			headers.forEach((header, index) => {
 				rowData[header] = row[index] !== undefined ? row[index] : ""; // Handle empty cells
 			});
 			return rowData;
 		});
+
 		console.log(`Successfully fetched ${data.length} sessions.`);
 		return data;
 	} catch (err) {
-		console.error("Error fetching sheet data:", err.message);
-		if (err.response?.data?.error) {
-			console.error("Google API Error:", err.response.data.error);
-		}
-		throw new Error(`Could not fetch sheet data: ${err.message}`);
+		console.error("Error fetching sheet data:", err);
+		exit(1);
 	}
-}
+};
 
 // --- Google Drive Helper ---
 async function uploadToDrive(auth, filePath, fileName, folderId) {
@@ -110,16 +105,13 @@ async function processSessions() {
 	console.log("Starting Remotion render and upload process...");
 	await fs.mkdir(ASSET_FOLDER, { recursive: true });
 
-	let auth;
-	try {
-		auth = await getGoogleAuth();
-	} catch (authError) {
-		console.error("Google Authentication failed:", authError.message);
+	let auth = await getGoogleAuth().catch((e) => {
+		console.error("Google Authentication failed:", e);
 		console.error(
 			"Ensure 'credentials.json' is valid and has correct permissions for Sheets and Drive.",
 		);
-		return;
-	}
+		exit(1);
+	});
 
 	const sessions = await getSheetData(auth);
 	if (sessions.length === 0) return;
