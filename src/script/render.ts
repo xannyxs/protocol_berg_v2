@@ -158,9 +158,8 @@ async function processSessions() {
 	);
 
 	for (const session of sessions) {
-		const sessionTitle = session["Title of the session"];
+		const sessionTitle = session["Title of the session (required)"];
 		if (!sessionTitle) {
-			// Basic check to skip rows that might be completely empty but not filtered out
 			console.warn("Skipping session due to missing title.");
 			continue;
 		}

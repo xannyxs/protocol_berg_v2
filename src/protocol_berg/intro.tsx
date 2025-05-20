@@ -1,8 +1,6 @@
-import { loadFont } from "@remotion/fonts";
 import dayjs from "dayjs";
 import {
 	AbsoluteFill,
-	CompositionProps,
 	Img,
 	interpolate,
 	OffthreadVideo,
@@ -12,16 +10,6 @@ import {
 } from "remotion";
 import { z } from "zod";
 import { CreateAvatar } from "../utils/createAvatar";
-
-const fontFamily = "LM";
-
-loadFont({
-	family: fontFamily,
-	url: staticFile("LM-regular.ttf"),
-	weight: "500",
-}).then(() => {
-	console.log("Font loaded!");
-});
 
 export interface SpeakerProps {
 	id: string;
