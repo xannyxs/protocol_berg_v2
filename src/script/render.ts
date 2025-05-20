@@ -1,57 +1,279 @@
-import { join } from "path";
+import { join, extname } from "path";
+import fs from "fs/promises";
+import { Readable } from "stream";
 import { bundle } from "@remotion/bundler";
 import { getCompositions, renderMedia, renderStill } from "@remotion/renderer";
+import { google } from "googleapis";
 
-start()
-	.then(() => {
-		process.exit(0);
-	})
-	.catch((err) => {
-		console.log(err);
-		process.exit(1);
+const CREDENTIALS_PATH = join(process.cwd(), "credentials.json");
+const SPREADSHEET_ID = "1G6mHLw9Y8h8pN4g-b0VNm1djx7eJLcMpXZtZB4JSm9E";
+const SHEET_NAME = "Sessions";
+const REMOTION_ENTRY_POINT = join(process.cwd(), "src", "index.ts");
+const ASSET_FOLDER = join(process.cwd(), "output_assets");
+
+// Mapping of Stage names from your sheet to Google Drive Folder IDs
+// IMPORTANT: Replace these placeholder IDs with your actual Google Drive subfolder IDs!
+const STAGE_TO_FOLDER_ID_MAP = {
+	// Get these IDs from the URL of each folder in Google Drive
+	// e.g., drive.google.com/drive/folders/THIS_IS_THE_ID
+	"Main Stage": "YOUR_MAIN_STAGE_FOLDER_ID",
+	"Community Stage": "YOUR_COMMUNITY_STAGE_FOLDER_ID",
+	"Stage 1": "YOUR_STAGE_1_FOLDER_ID",
+	"Stage 2": "YOUR_STAGE_2_FOLDER_ID",
+	// Add more mappings if you have other stages
+};
+const DEFAULT_DRIVE_FOLDER_ID = "1vMdKFqW--3_Y6imkjwex_DsI2P9os7Sb"; // Fallback (parent folder)
+
+// --- Google API Authentication ---
+async function getGoogleAuth() {
+	const auth = new google.auth.GoogleAuth({
+		keyFile: CREDENTIALS_PATH,
+		scopes: [
+			"https://www.googleapis.com/auth/spreadsheets.readonly",
+			"https://www.googleapis.com/auth/drive.file", // Allows creating/uploading files
+		],
 	});
+	return auth.getClient();
+}
 
-async function start() {
-	console.log(`Run Remotion renderer..`);
+// --- Google Sheets Helper ---
+async function getSheetData(auth) {
+	const sheets = google.sheets({ version: "v4", auth });
+	try {
+		console.log(`Workspaceing data from sheet: ${SHEET_NAME}`);
+		const response = await sheets.spreadsheets.values.get({
+			spreadsheetId: SPREADSHEET_ID,
+			range: `${SHEET_NAME}!A:Z`, // Read all columns up to Z, adjust if wider
+		});
+		const rows = response.data.values;
+		if (!rows || rows.length === 0) {
+			console.log("No data found in the sheet.");
+			return [];
+		}
 
-	const bundled = await bundle({
-		entryPoint: join(process.cwd(), "src", "index.ts"),
-	});
+		const headers = rows[0].map((header) => header.trim());
+		const data = rows.slice(1).map((row) => {
+			const rowData = {};
+			headers.forEach((header, index) => {
+				rowData[header] = row[index] !== undefined ? row[index] : ""; // Handle empty cells
+			});
+			return rowData;
+		});
+		console.log(`Successfully fetched ${data.length} sessions.`);
+		return data;
+	} catch (err) {
+		console.error("Error fetching sheet data:", err.message);
+		if (err.response?.data?.error) {
+			console.error("Google API Error:", err.response.data.error);
+		}
+		throw new Error(`Could not fetch sheet data: ${err.message}`);
+	}
+}
 
-	const compositions = await getCompositions(bundled);
-	if (compositions.length === 0) {
-		console.log("No compositions found for. Skip rendering");
+// --- Google Drive Helper ---
+async function uploadToDrive(auth, filePath, fileName, folderId) {
+	const drive = google.drive({ version: "v3", auth });
+	const fileMetadata = {
+		name: fileName,
+		parents: [folderId],
+	};
+	const media = {
+		body: Readable.from(await fs.readFile(filePath)), // Use stream for large files
+	};
+
+	try {
+		console.log(`Uploading "${fileName}" to Drive Folder ID: ${folderId}...`);
+		const file = await drive.files.create({
+			requestBody: fileMetadata,
+			media: media,
+			fields: "id, name, webViewLink",
+		});
+		console.log(
+			`Successfully uploaded "${file.data.name}" (ID: ${file.data.id}).`,
+		);
+		console.log(`View link: ${file.data.webViewLink}`);
+		return file.data;
+	} catch (err) {
+		console.error(`Error uploading "${fileName}" to Drive:`, err.message);
+		if (err.response?.data?.error) {
+			console.error("Google API Error:", err.response.data.error);
+		}
+		throw new Error(`Drive upload failed: ${err.message}`);
+	}
+}
+
+// --- Main Render and Upload Logic ---
+async function processSessions() {
+	console.log("Starting Remotion render and upload process...");
+	await fs.mkdir(ASSET_FOLDER, { recursive: true });
+
+	let auth;
+	try {
+		auth = await getGoogleAuth();
+	} catch (authError) {
+		console.error("Google Authentication failed:", authError.message);
+		console.error(
+			"Ensure 'credentials.json' is valid and has correct permissions for Sheets and Drive.",
+		);
 		return;
 	}
 
-	const assetFolder = join(process.cwd(), "assets");
-	const inputProps = {
-		type: "1",
-		id: "evm-summit",
-		name: "Input Prop Session",
-		start: 1694248200000,
-		speakers: [],
-	};
+	const sessions = await getSheetData(auth);
+	if (sessions.length === 0) return;
 
-	for (const composition of compositions) {
-		if (composition.durationInFrames === 1) {
-			console.log(`Render still for ${composition.id}`);
-			await renderStill({
-				composition,
-				serveUrl: bundled,
-				output: `${assetFolder}/${composition.id}.png`,
-				inputProps: inputProps,
-			});
+	console.log("Bundling Remotion project...");
+	const bundled = await bundle({
+		entryPoint: REMOTION_ENTRY_POINT,
+	});
+	console.log("Remotion project bundled.");
+
+	const remotionComps = await getCompositions(bundled);
+	if (remotionComps.length === 0) {
+		console.error(
+			"No Remotion compositions found. Check your Remotion project.",
+		);
+		return;
+	}
+	// --- IMPORTANT: Select your Remotion Composition ---
+	// Option 1: Use the first composition found
+	// const targetRemotionComp = remotionComps[0];
+	// Option 2: Specify by ID (Recommended if you have multiple)
+	const targetRemotionCompId = "MainComposition"; // <--- CHANGE THIS to your actual Remotion comp ID
+	const targetRemotionComp = remotionComps.find(
+		(c) => c.id === targetRemotionCompId,
+	);
+
+	if (!targetRemotionComp) {
+		console.error(
+			`Remotion composition with ID "${targetRemotionCompId}" not found.`,
+		);
+		console.log(
+			"Available compositions:",
+			remotionComps.map((c) => c.id).join(", "),
+		);
+		return;
+	}
+	console.log(`Using Remotion composition: "${targetRemotionComp.id}"`);
+
+	for (const session of sessions) {
+		// --- Construct inputProps from session data ---
+		// This needs to match your Remotion component's expected props
+		// And the column names in your Google Sheet
+		const sessionName = session["Session Title"] || "Untitled Session"; // Example column name
+		const sessionId =
+			session["Session ID"] ||
+			sessionName.toLowerCase().replace(/\s+/g, "-") ||
+			`session-${Date.now()}`;
+		const sessionStartStr = session["Start Date & Time (UTC)"]; // Example: "2024-07-28 14:00"
+		const speakersStr = session["Speakers"] || ""; // Example: "Ada Lovelace, Charles Babbage"
+		const renderType =
+			session["Render Type"] ||
+			(targetRemotionComp.durationInFrames === 1 ? "Still" : "Animation"); // "Still" or "Animation"
+		const stage = session["Stage"] || "";
+
+		console.log(`\nProcessing session: "${sessionName}" (ID: ${sessionId})`);
+
+		const inputProps = {
+			id: sessionId,
+			name: sessionName,
+			start: sessionStartStr
+				? new Date(sessionStartStr + "Z").getTime()
+				: Date.now(), // Append Z if UTC, parse carefully
+			speakers: speakersStr
+				.split(",")
+				.map((name) => name.trim())
+				.filter(Boolean) // Remove empty names
+				.map((name) => ({
+					id: name
+						.toLowerCase()
+						.replace(/\s+/g, "-")
+						.replace(/[^a-z0-9-]/g, ""),
+					name: name,
+				})),
+			// Add any other props your Remotion component needs based on sheet columns
+			// e.g., track: session["Track"], description: session["Description"]
+		};
+
+		console.log("Render Input Props:", JSON.stringify(inputProps, null, 2));
+
+		let outputFilePath;
+		let outputFileName;
+
+		if (renderType.toLowerCase() === "still") {
+			outputFileName = `${sessionId}.png`;
+			outputFilePath = join(ASSET_FOLDER, outputFileName);
+			console.log(`Rendering Still: ${outputFileName}`);
+			try {
+				await renderStill({
+					composition: targetRemotionComp,
+					serveUrl: bundled,
+					output: outputFilePath,
+					inputProps: inputProps,
+					// imageFormat: 'jpeg', // if you prefer jpeg
+				});
+			} catch (renderError) {
+				console.error(
+					`Error rendering Still for "${sessionName}":`,
+					renderError,
+				);
+				continue; // Skip to next session
+			}
+		} else {
+			// Default to animation
+			outputFileName = `${sessionId}.mp4`;
+			outputFilePath = join(ASSET_FOLDER, outputFileName);
+			console.log(`Rendering Animation: ${outputFileName}`);
+			try {
+				await renderMedia({
+					codec: "h264",
+					composition: targetRemotionComp,
+					serveUrl: bundled,
+					outputLocation: outputFilePath,
+					inputProps: inputProps,
+					// quality: 'high', // Optional
+					// concurrency: null, // Uses all available cores
+				});
+			} catch (renderError) {
+				console.error(
+					`Error rendering Animation for "${sessionName}":`,
+					renderError,
+				);
+				continue; // Skip to next session
+			}
+		}
+		console.log(`Successfully rendered: ${outputFilePath}`);
+
+		// --- Upload to Google Drive ---
+		const targetFolderId =
+			STAGE_TO_FOLDER_ID_MAP[stage] || DEFAULT_DRIVE_FOLDER_ID;
+		if (!STAGE_TO_FOLDER_ID_MAP[stage]) {
+			console.warn(
+				`Warning: Stage "${stage}" not found in mapping. Uploading to default folder: ${DEFAULT_DRIVE_FOLDER_ID}`,
+			);
 		}
 
-		if (composition.durationInFrames > 1) {
-			await renderMedia({
-				codec: "h264",
-				composition,
-				serveUrl: bundled,
-				outputLocation: `${assetFolder}/${composition.id}.mp4`,
-				inputProps: inputProps,
-			});
+		try {
+			await uploadToDrive(auth, outputFilePath, outputFileName, targetFolderId);
+			// Optionally, delete the local file after successful upload
+			// await fs.unlink(outputFilePath);
+			// console.log(`Deleted local file: ${outputFilePath}`);
+		} catch (uploadError) {
+			console.error(
+				`Failed to upload "${outputFileName}" for session "${sessionName}".`,
+			);
+			// Decide if you want to stop or continue
 		}
 	}
+	console.log("\nAll sessions processed.");
 }
+
+// --- Run the script ---
+processSessions()
+	.then(() => {
+		console.log("Script finished successfully.");
+		process.exit(0);
+	})
+	.catch((err) => {
+		console.error("\nAn unhandled error occurred in the main process:", err);
+		process.exit(1);
+	});
