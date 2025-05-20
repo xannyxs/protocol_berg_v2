@@ -138,10 +138,7 @@ async function processSessions() {
 		return;
 	}
 
-	// --- IMPORTANT: Select your Target Remotion Composition ---
-	// Option 1: Use the first composition found (if you only have one relevant one)
-	// const targetRemotionComp = remotionComps[0];
-	// Option 2: Specify by ID (Recommended)
+	console.log(remotionComps);
 	const targetRemotionCompId = "MainComposition"; // <--- !!! CHANGE THIS to your actual Remotion comp ID !!!
 	const targetRemotionComp = remotionComps.find(
 		(c) => c.id === targetRemotionCompId,
