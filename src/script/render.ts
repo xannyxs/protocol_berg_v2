@@ -12,17 +12,12 @@ const SHEET_NAME = "Sessions";
 const REMOTION_ENTRY_POINT = join(process.cwd(), "src", "index.ts");
 const ASSET_FOLDER = join(process.cwd(), "output_assets");
 
-// Mapping of Stage names from your sheet to Google Drive Folder IDs
-// IMPORTANT: Replace these placeholder IDs with your actual Google Drive subfolder IDs!
-const STAGE_TO_FOLDER_ID_MAP = {
-	// Get these IDs from the URL of each folder in Google Drive
-	// e.g., drive.google.com/drive/folders/THIS_IS_THE_ID
+/* const STAGE_TO_FOLDER_ID_MAP = {
 	"Main Stage": "YOUR_MAIN_STAGE_FOLDER_ID",
 	"Community Stage": "YOUR_COMMUNITY_STAGE_FOLDER_ID",
 	"Stage 1": "YOUR_STAGE_1_FOLDER_ID",
 	"Stage 2": "YOUR_STAGE_2_FOLDER_ID",
-	// Add more mappings if you have other stages
-};
+}; */
 const DEFAULT_DRIVE_FOLDER_ID = "1vMdKFqW--3_Y6imkjwex_DsI2P9os7Sb"; // Fallback (parent folder)
 
 const getGoogleAuth = async () => {
@@ -165,7 +160,7 @@ async function processSessions() {
 		const renderType =
 			session["Render Type"] ||
 			(targetRemotionComp.durationInFrames === 1 ? "Still" : "Animation"); // "Still" or "Animation"
-		const stage = session["Stage"] || "";
+		// const stage = session["Stage"] || "";
 
 		console.log(`\nProcessing session: "${sessionName}" (ID: ${sessionId})`);
 
@@ -239,7 +234,6 @@ async function processSessions() {
 		}
 		console.log(`Successfully rendered: ${outputFilePath}`);
 
-		// --- Upload to Google Drive ---
 		const targetFolderId = DEFAULT_DRIVE_FOLDER_ID;
 
 		try {
